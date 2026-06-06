@@ -746,29 +746,29 @@ with st.sidebar:
             "Location permission required"
         )
 
-    st.divider()
+   st.divider()
 
-    st.subheader("☀ Solar Panels")
+   st.subheader("☀ Solar Panels")
 
    panel_type = st.selectbox(
-    "Solar Panel Type",
-    list(panel_db.keys())
-    )
-    panel = panel_db[panel_type]
+       "Solar Panel Type",
+        list(panel_db.keys())
+   )
 
-    panel_power = panel["Power"]
-    panel_efficiency = panel["Efficiency"]
-    panel_voc = panel["Voc"]
-    panel_isc = panel["Isc"]
-    panel_cost = panel["Cost"]
+   panel = panel_db[panel_type]
 
-    panel_qty = st.number_input(
-        "Panels Quantity",
-        min_value=1,
-        max_value=5000,
-        value=20
-    )
+   panel_power = panel["Power"]
+   panel_efficiency = panel["Efficiency"]
+   panel_voc = panel["Voc"]
+   panel_isc = panel["Isc"]
+   panel_cost = panel["Cost"]
 
+   panel_qty = st.number_input(
+       "Panels Quantity",
+       min_value=1,
+       max_value=5000,
+       value=20
+   )
     st.divider()
 
     st.subheader("🔌 Inverter")
