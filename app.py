@@ -4,7 +4,6 @@ import numpy as np
 import math
 import requests
 import plotly.graph_objects as go
-
 from datetime import datetime
 from io import BytesIO
 
