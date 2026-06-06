@@ -4,6 +4,7 @@ import numpy as np
 import math
 import requests
 import plotly.graph_objects as go
+
 from datetime import datetime
 from io import BytesIO
 
@@ -237,6 +238,8 @@ def get_7day_weather(lat, lon):
 
         return None
 
+from fpdf import FPDF
+
 # ==================================================
 # PDF REPORT
 # ==================================================
@@ -250,37 +253,55 @@ def generate_pdf_report(report_data):
 
     pdf.add_page()
 
-    pdf.set_font("Arial","B",16)
+    pdf.set_auto_page_break(auto=True, margin=15)
+
+    # Header
+    pdf.set_font("Helvetica", "B", 16)
 
     pdf.cell(
         0,
         10,
         "Solar Power Estimator Report",
-        0,
-        1,
-        "C"
+        new_x="LMARGIN",
+        new_y="NEXT",
+        align="C"
     )
 
     pdf.ln(5)
 
-    pdf.set_font("Arial","",10)
+    # Content
+    pdf.set_font("Helvetica", "", 10)
 
-    for k,v in report_data.items():
+    for k, v in report_data.items():
+
+        text = f"{k}: {v}"
+
+        # Remove unsupported Unicode characters
+        text = (
+            text.encode(
+                "latin-1",
+                errors="ignore"
+            )
+            .decode("latin-1")
+        )
 
         pdf.cell(
             0,
             8,
-            f"{k}: {v}",
-            0,
-            1
+            text,
+            new_x="LMARGIN",
+            new_y="NEXT"
         )
 
-    pdf_bytes = pdf.output(dest="S")
+    pdf_output = pdf.output()
 
-    if isinstance(pdf_bytes,str):
-        pdf_bytes = pdf_bytes.encode("latin-1")
+    if isinstance(pdf_output, bytearray):
+        return bytes(pdf_output)
 
-    return pdf_bytes
+    if isinstance(pdf_output, bytes):
+        return pdf_output
+
+    return pdf_output.encode("latin-1")
 
 # ==================================================
 # HEADER
@@ -289,7 +310,7 @@ def generate_pdf_report(report_data):
 st.markdown(
 """
 <div class='main-header'>
-⚡ Solar Power Estimator Pro v2
+ Solar Power Estimator Pro v2
 </div>
 """,
 unsafe_allow_html=True
