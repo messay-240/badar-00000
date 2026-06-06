@@ -383,37 +383,260 @@ db = {
 }
 
 # ==================================================
-# SOLAR PANELS DATABASE
+# SOLAR PANEL DATABASE
 # ==================================================
 
 panel_db = {
 
-"Jinko 545W Mono PERC":[21.5,0.55,0.28,-0.35,49.8,13.8,"Tier-1"],
+    "Monocrystalline 400W":{
+        "Power":400,
+        "Efficiency":21.5,
+        "Voc":49.5,
+        "Isc":10.2,
+        "Cost":140
+    },
 
-"Trina 550W Mono PERC":[21.8,0.58,0.29,-0.36,50.1,13.9,"Tier-1"],
+    "Monocrystalline 450W":{
+        "Power":450,
+        "Efficiency":22.0,
+        "Voc":50.2,
+        "Isc":11.1,
+        "Cost":155
+    },
 
-"LONGi 540W Hi-MO4":[21.2,0.52,0.27,-0.35,49.5,13.7,"Tier-1"],
+    "Monocrystalline 500W":{
+        "Power":500,
+        "Efficiency":22.5,
+        "Voc":52.0,
+        "Isc":12.0,
+        "Cost":175
+    },
 
-"Canadian 545W":[21.6,0.56,0.28,-0.35,49.9,13.8,"Tier-1"],
+    "Monocrystalline 550W":{
+        "Power":550,
+        "Efficiency":22.8,
+        "Voc":53.5,
+        "Isc":13.0,
+        "Cost":190
+    },
 
-"Jinko 580W TOPCon":[23.5,0.65,0.32,-0.30,50.8,14.5,"TOPCon"],
+    "Monocrystalline 600W":{
+        "Power":600,
+        "Efficiency":23.2,
+        "Voc":54.8,
+        "Isc":13.8,
+        "Cost":210
+    },
 
-"Trina 575W TOPCon":[23.8,0.68,0.33,-0.29,51.0,14.6,"TOPCon"],
+    "Polycrystalline 250W":{
+        "Power":250,
+        "Efficiency":16.0,
+        "Voc":37.0,
+        "Isc":8.8,
+        "Cost":75
+    },
 
-"LONGi 570W Hi-MO5":[23.2,0.62,0.31,-0.31,50.5,14.3,"TOPCon"],
+    "Polycrystalline 300W":{
+        "Power":300,
+        "Efficiency":17.0,
+        "Voc":39.0,
+        "Isc":9.2,
+        "Cost":90
+    },
 
-"JA Solar 575W":[23.6,0.66,0.32,-0.30,50.9,14.5,"TOPCon"],
+    "Polycrystalline 330W":{
+        "Power":330,
+        "Efficiency":17.5,
+        "Voc":40.5,
+        "Isc":9.8,
+        "Cost":100
+    },
 
-"Risen 590W":[24.0,0.70,0.34,-0.29,51.2,14.7,"Premium"],
+    "Polycrystalline 350W":{
+        "Power":350,
+        "Efficiency":18.0,
+        "Voc":41.5,
+        "Isc":10.0,
+        "Cost":110
+    },
 
-"SunPower 415W Maxeon":[25.2,0.85,0.42,-0.22,52.5,12.8,"IBC"],
+    "PERC 450W":{
+        "Power":450,
+        "Efficiency":22.0,
+        "Voc":50.0,
+        "Isc":11.2,
+        "Cost":160
+    },
 
-"Aiko 625W ABC":[25.5,0.88,0.43,-0.21,52.8,13.0,"IBC"],
+    "PERC 500W":{
+        "Power":500,
+        "Efficiency":22.5,
+        "Voc":51.0,
+        "Isc":12.1,
+        "Cost":180
+    },
 
-"Oxford PV 550W":[29.5,1.20,0.55,-0.20,53.5,12.5,"Perovskite"]
+    "PERC 550W":{
+        "Power":550,
+        "Efficiency":23.0,
+        "Voc":53.0,
+        "Isc":13.1,
+        "Cost":195
+    },
+
+    "Half-Cut Cell 450W":{
+        "Power":450,
+        "Efficiency":22.1,
+        "Voc":49.8,
+        "Isc":11.3,
+        "Cost":165
+    },
+
+    "Half-Cut Cell 550W":{
+        "Power":550,
+        "Efficiency":23.0,
+        "Voc":53.2,
+        "Isc":13.2,
+        "Cost":200
+    },
+
+    "Half-Cut Cell 600W":{
+        "Power":600,
+        "Efficiency":23.4,
+        "Voc":55.0,
+        "Isc":14.0,
+        "Cost":220
+    },
+
+    "Bifacial 500W":{
+        "Power":500,
+        "Efficiency":22.5,
+        "Voc":51.2,
+        "Isc":12.2,
+        "Cost":210
+    },
+
+    "Bifacial 550W":{
+        "Power":550,
+        "Efficiency":23.0,
+        "Voc":53.0,
+        "Isc":13.3,
+        "Cost":230
+    },
+
+    "Bifacial 600W":{
+        "Power":600,
+        "Efficiency":23.6,
+        "Voc":55.5,
+        "Isc":14.1,
+        "Cost":250
+    },
+
+    "TOPCon 550W":{
+        "Power":550,
+        "Efficiency":23.5,
+        "Voc":53.8,
+        "Isc":13.2,
+        "Cost":240
+    },
+
+    "TOPCon 600W":{
+        "Power":600,
+        "Efficiency":24.0,
+        "Voc":55.2,
+        "Isc":14.0,
+        "Cost":260
+    },
+
+    "TOPCon 650W":{
+        "Power":650,
+        "Efficiency":24.3,
+        "Voc":57.0,
+        "Isc":15.0,
+        "Cost":285
+    },
+
+    "N-Type TOPCon 550W":{
+        "Power":550,
+        "Efficiency":24.0,
+        "Voc":54.0,
+        "Isc":13.4,
+        "Cost":250
+    },
+
+    "N-Type TOPCon 600W":{
+        "Power":600,
+        "Efficiency":24.5,
+        "Voc":55.8,
+        "Isc":14.2,
+        "Cost":275
+    },
+
+    "N-Type TOPCon 700W":{
+        "Power":700,
+        "Efficiency":25.0,
+        "Voc":58.0,
+        "Isc":15.5,
+        "Cost":320
+    },
+
+    "HJT 550W":{
+        "Power":550,
+        "Efficiency":24.5,
+        "Voc":54.5,
+        "Isc":13.5,
+        "Cost":280
+    },
+
+    "HJT 600W":{
+        "Power":600,
+        "Efficiency":25.0,
+        "Voc":56.0,
+        "Isc":14.3,
+        "Cost":300
+    },
+
+    "HJT 700W":{
+        "Power":700,
+        "Efficiency":25.8,
+        "Voc":58.5,
+        "Isc":15.8,
+        "Cost":350
+    },
+
+    "Thin Film 150W":{
+        "Power":150,
+        "Efficiency":11.0,
+        "Voc":22.0,
+        "Isc":8.0,
+        "Cost":55
+    },
+
+    "Thin Film 250W":{
+        "Power":250,
+        "Efficiency":12.5,
+        "Voc":36.0,
+        "Isc":8.5,
+        "Cost":80
+    },
+
+    "Flexible Panel 100W":{
+        "Power":100,
+        "Efficiency":18.0,
+        "Voc":21.0,
+        "Isc":6.0,
+        "Cost":60
+    },
+
+    "Flexible Panel 200W":{
+        "Power":200,
+        "Efficiency":19.0,
+        "Voc":38.0,
+        "Isc":7.0,
+        "Cost":110
+    }
 
 }
-
 # ==================================================
 # BATTERY DATABASE
 # ==================================================
@@ -527,12 +750,17 @@ with st.sidebar:
 
     st.subheader("☀ Solar Panels")
 
-    panel_type = st.selectbox(
-        "Panel Type",
-        list(panel_db.keys())
+   panel_type = st.selectbox(
+    "Solar Panel Type",
+    list(panel_db.keys())
     )
+    panel = panel_db[panel_type]
 
-    p_eff, p_cost, voc, p_temp, voc_std, isc, panel_note = panel_db[panel_type]
+    panel_power = panel["Power"]
+    panel_efficiency = panel["Efficiency"]
+    panel_voc = panel["Voc"]
+    panel_isc = panel["Isc"]
+    panel_cost = panel["Cost"]
 
     panel_qty = st.number_input(
         "Panels Quantity",
