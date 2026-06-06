@@ -6,3 +6,5 @@ requests
 geopy
 fpdf2
 openpyxl
+folium
+streamlit-folium
