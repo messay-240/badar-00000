@@ -746,7 +746,7 @@ with st.sidebar:
             "Location permission required"
         )
 
-  with st.sidebar:
+    st.sidebar:
 
     st.divider()
 
