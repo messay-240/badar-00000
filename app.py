@@ -1415,7 +1415,13 @@ with tabs[2]:
             colorscale=[[0, '#10B981'], [0.4, '#F59E0B'], [0.7, '#F97316'], [1.0, '#EF4444']],
             hoverongaps=False,
             hovertemplate='Speed: %{x} km/h<br>Tilt: %{y}°<br>Force: %{z:.2f} kN<extra></extra>',
-            colorbar=dict(title='Force (kN)', tickfont=dict(color='#94A3B8'), titlefont=dict(color='#94A3B8'))
+           colorbar=dict(
+                  title=dict(
+                  text='Force (kN)',
+                  font=dict(color='#94A3B8')
+                  ),
+                  tickfont=dict(color='#94A3B8')
+           )
         ))
         fig_heat.update_layout(
             height=280, title="Wind Load Heat Map — Force (kN) by Speed & Tilt",
