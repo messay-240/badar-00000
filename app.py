@@ -293,6 +293,7 @@ db = {
     "Zimbabwe": [-19.0, "USD", 0.10, 0.25, "C", "High", "Import", 5.8, 47, 230, 50, 40, "High"],
 }
 
+# Panel DB: [efficiency%, cost_per_W, voc, temp_coef%/C, voc_std_V, isc_A, note]
 panel_db = {
     "Jinko 545W Mono PERC":        [21.5, 0.55, 0.28, -0.35, 49.8, 13.8, "Tier-1 Standard"],
     "Trina 550W Mono PERC":        [21.8, 0.58, 0.29, -0.36, 50.1, 13.9, "Tier-1 Standard"],
@@ -318,7 +319,7 @@ panel_db = {
     "QCells 415W Q.PEAK DUO":      [21.0, 0.50, 0.26, -0.35, 49.2, 13.5, "QCells Standard"],
     "QCells 480W Q.TRON":          [22.8, 0.60, 0.30, -0.32, 50.3, 14.2, "QCells Premium"],
     "JA 545W DeepBlue 3.0 Mono":   [21.4, 0.54, 0.28, -0.35, 49.7, 13.7, "JA Standard"],
-    "Risen 550W RSM144":            [21.7, 0.57, 0.28, -0.35, 49.9, 13.8, "Risen Standard"],
+    "Risen 550W RSM144":           [21.7, 0.57, 0.28, -0.35, 49.9, 13.8, "Risen Standard"],
 }
 
 battery_db = {
@@ -370,7 +371,6 @@ def safe_geocode(country_name, c_lat_fallback):
 
 @st.cache_data(ttl=1800)
 def fetch_live_weather(lat, lon):
-    """Fetch live weather: temperature, wind, cloud, GHI radiation from Open-Meteo."""
     url = "https://api.open-meteo.com/v1/forecast"
     params = {
         "latitude": lat, "longitude": lon,
@@ -399,11 +399,11 @@ def fetch_live_weather(lat, lon):
             today_df = hourly_df[hourly_df["Timestamp"].dt.date == hourly_df["Timestamp"].dt.date.iloc[0]].copy()
 
             daily_df = pd.DataFrame({
-                "Date":         pd.to_datetime(d.get("time", [])),
-                "GHI_sum":      d.get("shortwave_radiation_sum", []),
-                "Wind_max":     d.get("wind_speed_10m_max", []),
-                "Temp_max":     d.get("temperature_2m_max", []),
-                "Temp_min":     d.get("temperature_2m_min", []),
+                "Date":     pd.to_datetime(d.get("time", [])),
+                "GHI_sum":  d.get("shortwave_radiation_sum", []),
+                "Wind_max": d.get("wind_speed_10m_max", []),
+                "Temp_max": d.get("temperature_2m_max", []),
+                "Temp_min": d.get("temperature_2m_min", []),
             })
 
             avg_ghi_live = float(np.mean([x for x in d.get("shortwave_radiation_sum", [0.0]) if x])) / 1000.0 if d.get("shortwave_radiation_sum") else None
@@ -429,12 +429,11 @@ def fetch_live_weather(lat, lon):
                 "avg_cloud": avg_cloud_live,
                 "success": True,
             }
-    except Exception as e:
+    except Exception:
         pass
     return {"success": False}
 
 def get_weather_params(lat, lon, db_ghi, db_wind, db_temp, use_live):
-    """Return effective weather params — live if available, else DB fallback."""
     if use_live:
         wd = fetch_live_weather(lat, lon)
         if wd.get("success"):
@@ -460,21 +459,17 @@ def calc_wind_load(wind_speed_kmh, tilt_angle, panel_qty, panel_area_m2=2.1):
     return force_per_panel * panel_qty
 
 def calc_fea_stress(wind_speed_kmh, tilt_angle, panel_qty, struct):
-    """Simplified FEA: compute von Mises stress in mounting rail & leg."""
     wind_ms = wind_speed_kmh / 3.6
     q = 0.613 * wind_ms ** 2
     cp = 1.3 if tilt_angle > 30 else (1.0 if tilt_angle > 15 else 0.8)
     f_panel = q * cp * 2.1
     f_total = f_panel * panel_qty
-    # Moment arm: panel centroid ~0.9m above rail
     moment = f_total * 0.9
-    # Tube section: 60x60x3mm RHS → Z = b*h²/6 - (b-2t)(h-2t)²/6 (approx)
-    Z_rail = (60 * 60**2 - 54 * 54**2) / 6.0 / 1e6  # m³
-    sigma_bending = moment / max(Z_rail, 1e-9) / 1e6   # MPa
-    # Axial uplift on post
+    Z_rail = (60 * 60**2 - 54 * 54**2) / 6.0 / 1e6
+    sigma_bending = moment / max(Z_rail, 1e-9) / 1e6
     uplift = f_total * np.sin(np.radians(tilt_angle))
-    post_area = 4e-4  # m² (20mm dia rod)
-    sigma_axial = uplift / post_area / 1e6   # MPa
+    post_area = 4e-4
+    sigma_axial = uplift / post_area / 1e6
     von_mises = np.sqrt(sigma_bending**2 + sigma_axial**2)
     yield_mpa = struct.get("yield_mpa", 235)
     safety_factor = yield_mpa / max(von_mises, 0.001)
@@ -493,7 +488,6 @@ def calc_lightning_protection(building_height):
     return building_height + 1.5, 30
 
 def model_solar_physics(temp, wind_ms, cloud, hour, cfg):
-    """Physics-based solar output model using actual irradiance or sinusoidal fallback."""
     if 6 <= hour <= 18:
         amplitude = 1050.0
         base_ghi = amplitude * np.sin(np.pi * (hour - 6) / 12)
@@ -503,14 +497,14 @@ def model_solar_physics(temp, wind_ms, cloud, hour, cfg):
     else:
         return {"Power_kW": 0.0, "Cell_Temp": temp, "Irradiance": 0.0}
 
-    attenuation       = (cloud / 100.0) * 0.82
-    incident_irr      = effective_ghi * (1.0 - attenuation)
-    cooling_index     = 1.0 + (wind_ms * 0.035)
-    cell_temp         = temp + ((45.0 - 20.0) * (incident_irr / 800.0) / cooling_index)
-    thermal_loss      = 1.0 - max(0, (cell_temp - 25.0) * abs(cfg["temp_coef"])) if cell_temp > 25 else 1.0
-    total_age_loss    = cfg["system_age"] * (cfg["annual_degrad"] / 100.0)
-    retained_eff      = max(0.5, 1.0 - total_age_loss)
-    field_peak_kw     = (cfg["panel_w"] * cfg["panel_count"]) / 1000.0
+    attenuation  = (cloud / 100.0) * 0.82
+    incident_irr = effective_ghi * (1.0 - attenuation)
+    cooling_index = 1.0 + (wind_ms * 0.035)
+    cell_temp     = temp + ((45.0 - 20.0) * (incident_irr / 800.0) / cooling_index)
+    thermal_loss  = 1.0 - max(0, (cell_temp - 25.0) * abs(cfg["temp_coef"])) if cell_temp > 25 else 1.0
+    total_age_loss = cfg["system_age"] * (cfg["annual_degrad"] / 100.0)
+    retained_eff  = max(0.5, 1.0 - total_age_loss)
+    field_peak_kw = (cfg["panel_w"] * cfg["panel_count"]) / 1000.0
     net_kw = (field_peak_kw * (incident_irr / 1000.0) * thermal_loss
               * (cfg["inverter_eff"] / 100.0) * (1.0 - cfg["soiling"] / 100.0) * retained_eff)
     return {"Power_kW": max(0.0, round(net_kw, 3)),
@@ -521,18 +515,18 @@ def compute_financial_net_metering(daily_gen_kwh, daily_load_kwh, cfg):
     imp = cfg["tariff_import"]
     exp = cfg["tariff_export"]
     if daily_gen_kwh >= daily_load_kwh:
-        surplus    = daily_gen_kwh - daily_load_kwh
-        credit     = surplus * exp
-        net_benefit= daily_load_kwh * imp + credit
-        bill       = 0.0
+        surplus     = daily_gen_kwh - daily_load_kwh
+        credit      = surplus * exp
+        net_benefit = daily_load_kwh * imp + credit
+        bill        = 0.0
     else:
-        deficit    = daily_load_kwh - daily_gen_kwh
-        bill       = deficit * imp
-        credit     = 0.0
-        net_benefit= daily_gen_kwh * imp
+        deficit     = daily_load_kwh - daily_gen_kwh
+        bill        = deficit * imp
+        credit      = 0.0
+        net_benefit = daily_gen_kwh * imp
     capex  = cfg["panel_count"] * cfg["cost_per_panel"]
     annual = net_benefit * 365.25
-    payback= capex / annual if annual > 0 else 99.0
+    payback = capex / annual if annual > 0 else 99.0
     return {"Daily_Savings_Currency": round(net_benefit, 2),
             "Daily_Bill_Due": round(bill, 2),
             "Export_Credit": round(credit, 2),
@@ -667,20 +661,18 @@ with st.expander("💰 Financial & Tariff Parameters", expanded=False):
 lat, lon, location_name = safe_geocode(country, c_lat)
 weather = get_weather_params(lat, lon, avg_ghi_db, wind_kmh_db, temp_ambient_override, live_weather_toggle)
 
-# Effective parameters (live or DB)
 effective_ghi   = weather["ghi"]     if weather["ghi"] else sun_h_override
-effective_wind  = weather["wind"]    # already km/h from DB, m/s from API
+effective_wind  = weather["wind"]
 effective_temp  = weather["avg_temp"] if weather["live"] else temp_ambient_override
 effective_cloud = weather["avg_cloud"] if weather["live"] else 20.0
 
-# Convert API wind from m/s to km/h if live
 if weather["live"]:
-    effective_wind_kmh = effective_wind  # open-meteo returns km/h already
+    effective_wind_kmh = effective_wind
 else:
     effective_wind_kmh = wind_kmh_db
 
-sun_h = float(effective_ghi) if effective_ghi else sun_h_override
-wind  = float(effective_wind_kmh)
+sun_h        = float(effective_ghi) if effective_ghi else sun_h_override
+wind         = float(effective_wind_kmh)
 temp_ambient = float(effective_temp)
 cloud_pct    = float(effective_cloud)
 
@@ -714,11 +706,10 @@ daily_yield = (sys_size * sun_h * ((100 - sys_loss) / 100)
                * max(0.3, angle_eff) * (p_eff / 21.5) * temp_loss
                * soiling_loss * (inv_eff / 100) * inv_bonus * weather_factor)
 
-# Use live hourly irradiance if available
 if weather["live"] and weather["data"] and weather["data"].get("today") is not None:
     today_df = weather["data"]["today"]
     if len(today_df) >= 24:
-        live_ghi_24 = today_df["GHI_W"].values[:24]
+        live_ghi_24  = today_df["GHI_W"].values[:24]
         live_temp_24 = today_df["Temperature"].values[:24]
         live_wind_24 = today_df["Wind_Speed"].values[:24]
         gen_24 = []
@@ -830,7 +821,7 @@ k2[3].metric("📉 Voltage Drop", f"{vd_percent:.2f}%",         "⚠️ High" if
 k2[4].metric("💨 Wind Risk",    wind_zone,                    f"{wind:.0f} km/h",
              delta_color="inverse" if wind_zone in ["Extreme","High"] else "normal")
 k2[5].metric("🔩 FEA Stress",   f"{fea_result['von_mises']:.1f} MPa",
-             f"SF: {fea_result['sf']:.2f}" ,
+             f"SF: {fea_result['sf']:.2f}",
              delta_color="inverse" if fea_result["fail"] else "normal")
 
 st.divider()
@@ -888,7 +879,7 @@ with tabs[0]:
         yaxis=dict(title="Power (kW) / Energy (kWh)", gridcolor='rgba(255,255,255,0.06)'),
         hovermode='x unified',
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
     ea, eb, ec, ed = st.columns(4)
     ea.metric("Peak Generation", f"{max(gen_24):.2f} kW", "solar noon")
     eb.metric("Peak Load",        f"{max(load_24):.2f} kW", "evening peak")
@@ -910,7 +901,7 @@ with tabs[0]:
                                       name="Max Wind km/h", line=dict(color='#06B6D4', width=2)), row=2, col=1)
             fig7.update_layout(height=380, plot_bgcolor='rgba(11,20,55,0.6)', paper_bgcolor='rgba(0,0,0,0)',
                                 font=dict(color='#94A3B8'), legend=dict(bgcolor='rgba(0,0,0,0)'))
-            st.plotly_chart(fig7, use_container_width=True)
+            st.plotly_chart(fig7, width='stretch')
 
 # ── TAB 1: 3D Panel Animator ────────────────────────────────────────────
 with tabs[1]:
@@ -924,60 +915,72 @@ with tabs[1]:
 
     anim_cols_count = min(p_qty, 12)
     anim_rows_count = math.ceil(p_qty / anim_cols_count)
-    gen_24_js   = json.dumps([round(x, 3) for x in gen_24])
-    live_mode   = "true" if weather["live"] else "false"
+    gen_24_js  = json.dumps([round(x, 3) for x in gen_24])
+    live_mode  = "true" if weather["live"] else "false"
 
-    html_3d = f"""<!DOCTYPE html>
+    # Build JS variables safely as Python strings, injected once — no f-string confusion inside JS template literals
+    _wind_val      = float(wind)
+    _tilt_val      = int(tilt)
+    _sys_size_val  = float(sys_size)
+    _amb_t_val     = float(temp_ambient)
+    _wind_kmh_val  = float(wind)
+    _p_qty_val     = int(p_qty)
+    _rows_val      = int(anim_rows_count)
+    _cols_val      = int(anim_cols_count)
+    _strings_val   = int(strings)
+    _voc_str_val   = float(voc_string)
+
+    html_3d = """<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
 <style>
-* {{ margin:0; padding:0; box-sizing:border-box; }}
-body {{ background:#030C1E; overflow:hidden; font-family:'Segoe UI',sans-serif; }}
-canvas {{ display:block; }}
-#hud {{
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#030C1E; overflow:hidden; font-family:'Segoe UI',sans-serif; }
+canvas { display:block; }
+#hud {
   position:absolute; top:0; left:0; right:0;
   display:flex; gap:0; background:rgba(5,14,37,0.88);
   border-bottom:1px solid rgba(245,158,11,0.25);
   padding:7px 16px; justify-content:space-between; align-items:center;
   flex-wrap:wrap; gap:8px;
-}}
-.hud-cell {{ display:flex; flex-direction:column; align-items:center; min-width:80px; }}
-.hud-label {{ color:#4A6FA5; font-size:9px; letter-spacing:0.1em; text-transform:uppercase; }}
-.hud-val   {{ color:#F59E0B; font-size:13px; font-weight:700; font-family:'Courier New',monospace; }}
-.hud-green {{ color:#10B981; }}
-.hud-blue  {{ color:#06B6D4; }}
-.hud-red   {{ color:#EF4444; }}
-#bottom-bar {{
+}
+.hud-cell { display:flex; flex-direction:column; align-items:center; min-width:80px; }
+.hud-label { color:#4A6FA5; font-size:9px; letter-spacing:0.1em; text-transform:uppercase; }
+.hud-val   { color:#F59E0B; font-size:13px; font-weight:700; font-family:'Courier New',monospace; }
+.hud-green { color:#10B981; }
+.hud-blue  { color:#06B6D4; }
+.hud-red   { color:#EF4444; }
+#bottom-bar {
   position:absolute; bottom:0; left:0; right:0;
   background:rgba(5,14,37,0.88); border-top:1px solid rgba(245,158,11,0.2);
   padding:6px 16px; display:flex; gap:20px; align-items:center; flex-wrap:wrap;
-}}
-.bb-item {{ color:#64748B; font-size:10px; }}
-.bb-item span {{ color:#94A3B8; font-weight:600; }}
-#irr-bar-outer {{ flex:1; height:5px; background:#0F2057; border-radius:3px; overflow:hidden; min-width:60px; }}
-#irr-bar-fill  {{ height:100%; width:0%; background:linear-gradient(90deg,#1D4ED8,#F59E0B); transition:width 0.4s; border-radius:3px; }}
-#legend {{
+}
+.bb-item { color:#64748B; font-size:10px; }
+.bb-item span { color:#94A3B8; font-weight:600; }
+#irr-bar-outer { flex:1; height:5px; background:#0F2057; border-radius:3px; overflow:hidden; min-width:60px; }
+#irr-bar-fill  { height:100%; width:0%; background:linear-gradient(90deg,#1D4ED8,#F59E0B); transition:width 0.4s; border-radius:3px; }
+#legend {
   position:absolute; right:10px; top:60px;
   background:rgba(5,14,37,0.82); border:1px solid rgba(245,158,11,0.2);
   border-radius:10px; padding:10px 14px; font-size:10px; color:#94A3B8;
-}}
-.leg-row {{ display:flex; align-items:center; gap:7px; margin:3px 0; }}
-.leg-swatch {{ width:14px; height:14px; border-radius:3px; }}
+}
+.leg-row { display:flex; align-items:center; gap:7px; margin:3px 0; }
+.leg-swatch { width:14px; height:14px; border-radius:3px; }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
-
+""" + f"""
 <div id="hud">
   <div class="hud-cell"><div class="hud-label">Sim Time</div><div class="hud-val" id="hTime">06:00</div></div>
   <div class="hud-cell"><div class="hud-label">Irradiance</div><div class="hud-val" id="hIrr">0 W/m²</div></div>
   <div class="hud-cell"><div class="hud-label">Array Output</div><div class="hud-val hud-green" id="hPow">0.00 kW</div></div>
   <div class="hud-cell"><div class="hud-label">Cell Temp</div><div class="hud-val hud-red" id="hTemp">--°C</div></div>
-  <div class="hud-cell"><div class="hud-label">Wind</div><div class="hud-val hud-blue" id="hWind">{wind:.0f} km/h</div></div>
-  <div class="hud-cell"><div class="hud-label">Panels</div><div class="hud-val">{p_qty}</div></div>
-  <div class="hud-cell"><div class="hud-label">Sys kWp</div><div class="hud-val">{sys_size:.2f}</div></div>
-  <div class="hud-cell"><div class="hud-label">Tilt</div><div class="hud-val">{tilt}°</div></div>
+  <div class="hud-cell"><div class="hud-label">Wind</div><div class="hud-val hud-blue" id="hWind">{_wind_val:.0f} km/h</div></div>
+  <div class="hud-cell"><div class="hud-label">Panels</div><div class="hud-val">{_p_qty_val}</div></div>
+  <div class="hud-cell"><div class="hud-label">Sys kWp</div><div class="hud-val">{_sys_size_val:.2f}</div></div>
+  <div class="hud-cell"><div class="hud-label">Tilt</div><div class="hud-val">{_tilt_val}°</div></div>
   <div class="hud-cell"><div class="hud-label">Mode</div><div class="hud-val hud-green" id="hMode">{'LIVE' if weather['live'] else 'DB'}</div></div>
 </div>
 
@@ -992,87 +995,80 @@ canvas {{ display:block; }}
 </div>
 
 <div id="bottom-bar">
-  <div class="bb-item">Rows: <span>{anim_rows_count}</span></div>
-  <div class="bb-item">Cols: <span>{anim_cols_count}</span></div>
-  <div class="bb-item">Strings: <span>{strings}</span></div>
-  <div class="bb-item">VOC: <span>{voc_string:.0f}V</span></div>
+  <div class="bb-item">Rows: <span>{_rows_val}</span></div>
+  <div class="bb-item">Cols: <span>{_cols_val}</span></div>
+  <div class="bb-item">Strings: <span>{_strings_val}</span></div>
+  <div class="bb-item">VOC: <span>{_voc_str_val:.0f}V</span></div>
   <div class="bb-item">Country: <span>{country}</span></div>
   <div id="irr-bar-outer"><div id="irr-bar-fill"></div></div>
   <div class="bb-item">Irradiance → Peak</div>
 </div>
-
+""" + """
 <script>
 // ═══════════════════════════════════════════════════════
 //  SolarX 3D Engine — Canvas 2.5D Isometric Renderer
 // ═══════════════════════════════════════════════════════
 const canvas = document.getElementById('c');
 const ctx    = canvas.getContext('2d');
-
-const ROWS   = {anim_rows_count};
-const COLS   = {anim_cols_count};
-const N_PANELS = {p_qty};
-const TILT   = {tilt};
-const SYS_KWP= {sys_size:.4f};
-const AMB_T  = {temp_ambient:.1f};
-const WIND_KMH= {wind:.1f};
-const GEN_24 = {gen_24_js};
-const LIVE   = {live_mode};
-
+""" + f"""
+const ROWS    = {_rows_val};
+const COLS    = {_cols_val};
+const N_PANELS= {_p_qty_val};
+const TILT    = {_tilt_val};
+const SYS_KWP = {_sys_size_val:.4f};
+const AMB_T   = {_amb_t_val:.1f};
+const WIND_KMH= {_wind_kmh_val:.1f};
+const GEN_24  = {gen_24_js};
+const LIVE    = {live_mode};
+""" + """
 let W, H;
 
-function resize() {{
+function resize() {
   W = canvas.width  = window.innerWidth;
-  H = canvas.height = window.innerHeight - 52;  // HUD height
+  H = canvas.height = window.innerHeight - 52;
   canvas.style.marginTop = '52px';
-}}
+}
 resize();
 window.addEventListener('resize', resize);
 
-// ─── Isometric projection ────────────────────────────────────────────
 const ISO_ANGLE = Math.PI / 6;
 const SCALE     = Math.min(W, H) * 0.022;
 const TILT_RAD  = (TILT * Math.PI) / 180;
 
-// Panel dimensions in world units
-const PW = 1.0;   // width
-const PH = 1.7;   // height  (portrait)
-const PG = 0.18;  // gap between panels
+const PW = 1.0;
+const PH = 1.7;
+const PG = 0.18;
 
-// World → Screen (isometric)
-function iso(wx, wy, wz) {{
-  // wx = east, wy = north, wz = up
+function iso(wx, wy, wz) {
   const sx = W / 2 + (wx - wy) * Math.cos(ISO_ANGLE) * SCALE;
   const sy = H / 2 - wz * SCALE + (wx + wy) * Math.sin(ISO_ANGLE) * SCALE * 0.55;
   return [sx, sy];
-}}
+}
 
-// ─── Colour utilities ────────────────────────────────────────────────
-function lerp(a, b, t) {{ return a + (b - a) * t; }}
-function lerpRGB(r1,g1,b1, r2,g2,b2, t) {{
+function lerp(a, b, t) { return a + (b - a) * t; }
+function lerpRGB(r1,g1,b1, r2,g2,b2, t) {
   return [Math.round(lerp(r1,r2,t)), Math.round(lerp(g1,g2,t)), Math.round(lerp(b1,b2,t))];
-}}
-function panelFaceColor(irrFrac, face) {{
-  // face: 'front','top','side'
+}
+function panelFaceColor(irrFrac, face) {
   let r,g,b;
-  if (irrFrac < 0.5) {{
+  if (irrFrac < 0.5) {
     const t = irrFrac * 2;
     [r,g,b] = lerpRGB(0x0A,0x18,0x42, 0x06,0x7A,0xC4, t);
-  }} else {{
+  } else {
     const t = (irrFrac-0.5)*2;
     [r,g,b] = lerpRGB(0x06,0x7A,0xC4, 0xF5,0x9E,0x0B, t);
-  }}
+  }
   const shade = face==='front' ? 1.0 : face==='top' ? 0.82 : 0.55;
-  return `rgb(${{Math.round(r*shade)}},${{Math.round(g*shade)}},${{Math.round(b*shade)}})`;
-}}
+  return 'rgb('+Math.round(r*shade)+','+Math.round(g*shade)+','+Math.round(b*shade)+')';
+}
 
-function steelColor(face) {{
+function steelColor(face) {
   if (face==='front') return '#5C6370';
   if (face==='top')   return '#78818C';
   return '#3D4249';
-}}
+}
 
-// ─── Draw iso box (six faces, only 3 visible) ────────────────────────
-function drawIsoBox(x, y, z, dx, dy, dz, colTop, colFront, colRight) {{
+function drawIsoBox(x, y, z, dx, dy, dz, colTop, colFront, colRight) {
   const p = [
     iso(x,    y,    z),
     iso(x+dx, y,    z),
@@ -1083,48 +1079,36 @@ function drawIsoBox(x, y, z, dx, dy, dz, colTop, colFront, colRight) {{
     iso(x+dx, y+dy, z+dz),
     iso(x,    y+dy, z+dz),
   ];
-  // Top face
   ctx.beginPath();
   ctx.moveTo(...p[4]); ctx.lineTo(...p[5]);
   ctx.lineTo(...p[6]); ctx.lineTo(...p[7]); ctx.closePath();
   ctx.fillStyle = colTop; ctx.fill();
   ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 0.5; ctx.stroke();
-  // Front face (south)
   ctx.beginPath();
   ctx.moveTo(...p[0]); ctx.lineTo(...p[1]);
   ctx.lineTo(...p[5]); ctx.lineTo(...p[4]); ctx.closePath();
   ctx.fillStyle = colFront; ctx.fill(); ctx.stroke();
-  // Right face (east)
   ctx.beginPath();
   ctx.moveTo(...p[1]); ctx.lineTo(...p[2]);
   ctx.lineTo(...p[6]); ctx.lineTo(...p[5]); ctx.closePath();
   ctx.fillStyle = colRight; ctx.fill(); ctx.stroke();
-}}
+}
 
-// ─── Draw solar panel face (tilted) ─────────────────────────────────
-function drawTiltedPanel(baseX, baseY, baseZ, irrFrac, active) {{
-  // Panel is tilted around x-axis by TILT_RAD
-  // corners in world space
+function drawTiltedPanel(baseX, baseY, baseZ, irrFrac, active) {
   const sinT = Math.sin(TILT_RAD);
   const cosT = Math.cos(TILT_RAD);
-
-  // Front face corners (tilted)
-  const bl = [baseX,         baseY, baseZ];
-  const br = [baseX + PW,    baseY, baseZ];
-  const tr = [baseX + PW,    baseY - PH * sinT, baseZ + PH * cosT];
-  const tl = [baseX,         baseY - PH * sinT, baseZ + PH * cosT];
-
+  const bl = [baseX,      baseY, baseZ];
+  const br = [baseX + PW, baseY, baseZ];
+  const tr = [baseX + PW, baseY - PH * sinT, baseZ + PH * cosT];
+  const tl = [baseX,      baseY - PH * sinT, baseZ + PH * cosT];
   const pBL = iso(...bl);
   const pBR = iso(...br);
   const pTR = iso(...tr);
   const pTL = iso(...tl);
-
   const col = panelFaceColor(irrFrac, 'front');
   ctx.beginPath();
   ctx.moveTo(...pBL); ctx.lineTo(...pBR);
   ctx.lineTo(...pTR); ctx.lineTo(...pTL); ctx.closePath();
-
-  // Gradient fill simulating cell reflections
   const grd = ctx.createLinearGradient(pBL[0], pBL[1], pTR[0], pTR[1]);
   grd.addColorStop(0,   col);
   grd.addColorStop(0.3, irrFrac > 0.5 ? 'rgba(252,211,77,0.4)' : 'rgba(37,99,235,0.3)');
@@ -1134,273 +1118,234 @@ function drawTiltedPanel(baseX, baseY, baseZ, irrFrac, active) {{
   ctx.strokeStyle = active ? 'rgba(245,158,11,0.9)' : 'rgba(255,255,255,0.12)';
   ctx.lineWidth = active ? 1.5 : 0.7;
   ctx.stroke();
-
-  // Cell grid lines on panel
-  if (SCALE > 15) {{
+  if (SCALE > 15) {
     ctx.strokeStyle = 'rgba(255,255,255,0.08)';
     ctx.lineWidth = 0.4;
-    for (let ci = 1; ci < 4; ci++) {{
+    for (let ci = 1; ci < 4; ci++) {
       const t = ci / 4;
       const left  = [pBL[0] + (pTL[0]-pBL[0])*t, pBL[1] + (pTL[1]-pBL[1])*t];
       const right = [pBR[0] + (pTR[0]-pBR[0])*t, pBR[1] + (pTR[1]-pBR[1])*t];
       ctx.beginPath(); ctx.moveTo(...left); ctx.lineTo(...right); ctx.stroke();
-    }}
-    for (let ri = 1; ri < 3; ri++) {{
+    }
+    for (let ri = 1; ri < 3; ri++) {
       const t = ri / 3;
       const bot = [pBL[0] + (pBR[0]-pBL[0])*t, pBL[1] + (pBR[1]-pBL[1])*t];
       const top = [pTL[0] + (pTR[0]-pTL[0])*t, pTL[1] + (pTR[1]-pTL[1])*t];
       ctx.beginPath(); ctx.moveTo(...bot); ctx.lineTo(...top); ctx.stroke();
-    }}
-  }}
+    }
+  }
+  return { pBL, pBR, pTR, pTL };
+}
 
-  return {{ pBL, pBR, pTR, pTL, bl, br, tr, tl }};
-}}
-
-// ─── Draw structural leg ─────────────────────────────────────────────
-function drawLeg(x, y, height) {{
+function drawLeg(x, y, height) {
   const tw = 0.08;
   drawIsoBox(x-tw/2, y-tw/2, 0, tw, tw, height, steelColor('top'), steelColor('front'), steelColor('right'));
-}}
+}
 
-// ─── Draw mounting rail ──────────────────────────────────────────────
-function drawRail(x1, y, z, length) {{
+function drawRail(x1, y, z, length) {
   drawIsoBox(x1, y - 0.04, z, length, 0.08, 0.06, steelColor('top'), steelColor('front'), steelColor('right'));
-}}
+}
 
-// ─── Draw bolt/node ──────────────────────────────────────────────────
-function drawBolt(x, y, z) {{
+function drawBolt(x, y, z) {
   const [sx, sy] = iso(x, y, z);
   ctx.beginPath();
   ctx.arc(sx, sy, 3, 0, Math.PI*2);
   ctx.fillStyle = '#A0AEC0';
   ctx.fill();
   ctx.strokeStyle = '#F59E0B'; ctx.lineWidth = 0.8; ctx.stroke();
-}}
+}
 
-// ─── Wind particles ──────────────────────────────────────────────────
 const NUM_WP = 20;
 let wParticles = [];
-for (let i = 0; i < NUM_WP; i++) {{
-  wParticles.push({{
+for (let i = 0; i < NUM_WP; i++) {
+  wParticles.push({
     wx: (Math.random()-0.5) * (COLS+2) * (PW+PG) + (COLS*(PW+PG))/2,
     wy: -2 + Math.random() * (ROWS+4) * (PH+PG) * 0.6,
     wz: Math.random() * 3,
     vx: 0.04 + Math.random()*0.06,
     life: Math.random(),
     len: 0.3 + Math.random()*0.5,
-  }});
-}}
+  });
+}
 
-function updateWindParticles(windFactor) {{
-  for (let p of wParticles) {{
+function updateWindParticles(windFactor) {
+  for (let p of wParticles) {
     p.wx += p.vx * windFactor;
     p.life += 0.02;
-    if (p.wx > (COLS+3)*(PW+PG) || p.life > 1) {{
+    if (p.wx > (COLS+3)*(PW+PG) || p.life > 1) {
       p.wx = -1.5;
       p.wy = -2 + Math.random()*(ROWS+4)*(PH+PG)*0.6;
       p.wz = Math.random()*3;
       p.life = 0;
       p.len  = 0.3 + Math.random()*0.5;
-    }}
-  }}
-}}
+    }
+  }
+}
 
-function drawWindParticles(windFactor) {{
+function drawWindParticles(windFactor) {
   const alpha = Math.min(0.8, 0.25 + windFactor * 0.4);
-  for (let p of wParticles) {{
-    const [x1, y1] = iso(p.wx,        p.wy, p.wz);
-    const [x2, y2] = iso(p.wx-p.len,  p.wy, p.wz);
+  for (let p of wParticles) {
+    const [x1, y1] = iso(p.wx,       p.wy, p.wz);
+    const [x2, y2] = iso(p.wx-p.len, p.wy, p.wz);
     ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2);
-    ctx.strokeStyle = `rgba(6,182,212,${alpha * (1-p.life*0.5)})`;
+    const particleAlpha = alpha * (1 - p.life * 0.5);
+    ctx.strokeStyle = 'rgba(6,182,212,' + particleAlpha + ')';
     ctx.lineWidth = 1.2; ctx.stroke();
-  }}
-}}
+  }
+}
 
-// ─── Light beams ─────────────────────────────────────────────────────
-function drawLightBeams(sunSX, sunSY, irrFrac, panels) {{
+function drawLightBeams(sunSX, sunSY, irrFrac, panels) {
   if (irrFrac < 0.05) return;
   ctx.save();
   ctx.globalAlpha = irrFrac * 0.18;
   ctx.strokeStyle = '#FCD34D';
   ctx.lineWidth   = 0.8;
-  for (let i = 0; i < panels.length; i += Math.max(1, Math.floor(panels.length/8))) {{
+  for (let i = 0; i < panels.length; i += Math.max(1, Math.floor(panels.length/8))) {
     const p = panels[i];
     if (!p) continue;
     ctx.beginPath();
     ctx.moveTo(sunSX, sunSY);
     ctx.lineTo((p.pTL[0]+p.pTR[0])/2, (p.pTL[1]+p.pTR[1])/2);
     ctx.stroke();
-  }}
+  }
   ctx.restore();
-}}
+}
 
-// ─── Sun position (arc) ──────────────────────────────────────────────
-function sunScreenPos(hour) {{
+function sunScreenPos(hour) {
   const t = Math.max(0, Math.min(1, (hour - 6) / 12));
-  // Bezier arc across sky
   const P0 = [W*0.05, H*0.85];
   const P1 = [W*0.50, H*0.08];
   const P2 = [W*0.95, H*0.85];
   const x = (1-t)*(1-t)*P0[0] + 2*(1-t)*t*P1[0] + t*t*P2[0];
   const y = (1-t)*(1-t)*P0[1] + 2*(1-t)*t*P1[1] + t*t*P2[1];
   return [x, y];
-}}
+}
 
-function drawSun(hour, irrFrac) {{
+function drawSun(hour, irrFrac) {
   if (hour < 6 || hour > 18) return;
   const [sx, sy] = sunScreenPos(hour);
   const opacity = 0.3 + irrFrac*0.7;
-  // Outer glow
   const grd = ctx.createRadialGradient(sx,sy,0, sx,sy,90);
-  grd.addColorStop(0,   `rgba(252,211,77,${opacity*0.9})`);
-  grd.addColorStop(0.4, `rgba(245,158,11,${opacity*0.3})`);
+  grd.addColorStop(0,   'rgba(252,211,77,' + (opacity*0.9) + ')');
+  grd.addColorStop(0.4, 'rgba(245,158,11,' + (opacity*0.3) + ')');
   grd.addColorStop(1.0, 'rgba(245,158,11,0)');
   ctx.beginPath(); ctx.arc(sx,sy,90,0,Math.PI*2);
   ctx.fillStyle = grd; ctx.fill();
-  // Core
   const core = ctx.createRadialGradient(sx,sy,0,sx,sy,22);
   core.addColorStop(0,   '#FEFCE8');
   core.addColorStop(0.5, '#FCD34D');
   core.addColorStop(1.0, '#F59E0B');
   ctx.beginPath(); ctx.arc(sx,sy,22,0,Math.PI*2);
   ctx.fillStyle = core; ctx.fill();
-  // Rays
   ctx.save(); ctx.translate(sx,sy); ctx.rotate(simH * 0.8);
-  ctx.strokeStyle = `rgba(252,211,77,${opacity*0.6})`;
+  ctx.strokeStyle = 'rgba(252,211,77,' + (opacity*0.6) + ')';
   ctx.lineWidth = 2;
-  for (let a = 0; a < 8; a++) {{
+  for (let a = 0; a < 8; a++) {
     const angle = a * Math.PI/4;
     ctx.beginPath();
     ctx.moveTo(Math.cos(angle)*28, Math.sin(angle)*28);
     ctx.lineTo(Math.cos(angle)*44, Math.sin(angle)*44);
     ctx.stroke();
-  }}
+  }
   ctx.restore();
-}}
+}
 
-// ─── Ground + sky ────────────────────────────────────────────────────
-function drawSkyGround(irrFrac) {{
-  const skyTop = `rgb(${{Math.round(lerp(2,8,irrFrac))}},${{Math.round(lerp(10,22,irrFrac))}},${{Math.round(lerp(30,60,irrFrac))}})`;
-  const skyBot = `rgb(${{Math.round(lerp(8,15,irrFrac))}},${{Math.round(lerp(18,40,irrFrac))}},${{Math.round(lerp(50,90,irrFrac))}})`;
+function drawSkyGround(irrFrac) {
+  const rTop = Math.round(lerp(2,8,irrFrac));
+  const gTop = Math.round(lerp(10,22,irrFrac));
+  const bTop = Math.round(lerp(30,60,irrFrac));
+  const rBot = Math.round(lerp(8,15,irrFrac));
+  const gBot = Math.round(lerp(18,40,irrFrac));
+  const bBot = Math.round(lerp(50,90,irrFrac));
   const sg = ctx.createLinearGradient(0,0,0,H);
-  sg.addColorStop(0, skyTop); sg.addColorStop(1, skyBot);
+  sg.addColorStop(0, 'rgb('+rTop+','+gTop+','+bTop+')');
+  sg.addColorStop(1, 'rgb('+rBot+','+gBot+','+bBot+')');
   ctx.fillStyle = sg; ctx.fillRect(0,0,W,H);
-  // Horizon line
-  const [h0] = iso(0, 0, 0);
-  const [h1] = iso(0, ROWS*(PH+PG)+2, 0);
-  // Ground
   const grd = ctx.createLinearGradient(0, H*0.7, 0, H);
   grd.addColorStop(0, '#0D1F0D');
   grd.addColorStop(1, '#060E06');
   ctx.fillStyle = grd; ctx.fillRect(0, H*0.65, W, H*0.35);
-  // Ground grid
   ctx.strokeStyle = 'rgba(16,185,129,0.1)'; ctx.lineWidth = 0.5;
-  for (let gx = -2; gx <= COLS+2; gx += 2) {{
+  for (let gx = -2; gx <= COLS+2; gx += 2) {
     const [sx1,sy1] = iso(gx*(PW+PG), 0, 0);
     const [sx2,sy2] = iso(gx*(PW+PG), ROWS*(PH+PG)*0.5+3, 0);
     ctx.beginPath(); ctx.moveTo(sx1,sy1); ctx.lineTo(sx2,sy2); ctx.stroke();
-  }}
-  for (let gy = 0; gy <= ROWS*(PH+PG)*0.5+3; gy += 2) {{
+  }
+  for (let gy = 0; gy <= ROWS*(PH+PG)*0.5+3; gy += 2) {
     const [sx1,sy1] = iso(0, gy, 0);
     const [sx2,sy2] = iso((COLS+1)*(PW+PG), gy, 0);
     ctx.beginPath(); ctx.moveTo(sx1,sy1); ctx.lineTo(sx2,sy2); ctx.stroke();
-  }}
-}}
+  }
+}
 
-// ─── Sun path arc ────────────────────────────────────────────────────
-function drawSunPath() {{
+function drawSunPath() {
   ctx.beginPath();
   const steps = 30;
-  for (let s = 0; s <= steps; s++) {{
+  for (let s = 0; s <= steps; s++) {
     const h = 6 + s * 12 / steps;
     const [sx, sy] = sunScreenPos(h);
     s === 0 ? ctx.moveTo(sx,sy) : ctx.lineTo(sx,sy);
-  }}
+  }
   ctx.strokeStyle = 'rgba(245,158,11,0.10)'; ctx.lineWidth = 1.5;
   ctx.setLineDash([4,8]); ctx.stroke(); ctx.setLineDash([]);
-}}
+}
 
-// ─── Main animation state ─────────────────────────────────────────────
 let simH = 6.0;
-const SPEED = 0.03;  // hours/frame
+const SPEED = 0.03;
 
-function irradiance(hour) {{
+function irradiance(hour) {
   if (hour < 6 || hour > 18) return 0;
   return 1050 * Math.sin(Math.PI * (hour-6)/12);
-}}
-function cellTemp(irr, windKmh) {{
+}
+function cellTemp(irr, windKmh) {
   const wms = windKmh / 3.6;
   return AMB_T + (45-20) * (irr/800) / (1 + wms*0.035);
-}}
-function powerKW(irr) {{
+}
+function powerKW(irr) {
   const ct  = cellTemp(irr, WIND_KMH);
   const tl  = Math.max(0, 1 - Math.max(0, ct-25) * 0.0035);
   return SYS_KWP * (irr/1000) * 0.975 * tl * 0.965;
-}}
+}
 
-// ─── MAIN DRAW ────────────────────────────────────────────────────────
-function frame() {{
+function frame() {
   simH += SPEED;
   if (simH >= 24) simH = 0;
-
   const irr     = irradiance(simH);
   const irrFrac = irr / 1050;
   const power   = powerKW(irr);
   const cTemp   = cellTemp(irr, WIND_KMH);
-
   ctx.clearRect(0,0,W,H);
   drawSkyGround(irrFrac);
   drawSunPath();
   drawSun(simH, irrFrac);
-
-  // Wind particles
   const windFactor = 0.8 + (WIND_KMH/120)*1.5;
   updateWindParticles(windFactor);
   drawWindParticles(windFactor);
-
   const panelGeoms = [];
-
-  // ── Draw structure + panels ──────────────────────────────────────
   let pIdx = 0;
-  // Sorting: draw back-to-front (painter's algorithm)
-  for (let row = ROWS-1; row >= 0; row--) {{
-    for (let col = 0; col < COLS; col++) {{
+  for (let row = ROWS-1; row >= 0; row--) {
+    for (let col = 0; col < COLS; col++) {
       if (pIdx >= N_PANELS) break;
-
       const wx = col * (PW + PG);
       const wy = row * (PH * Math.cos(TILT_RAD) + 0.3);
-      const wz = 0.8;  // rail height
-
-      // Structural legs (2 per panel row at each column)
+      const wz = 0.8;
       const legH = 0.8 + row * 0.12;
       drawLeg(wx + 0.15, wy + 0.15, legH);
       drawLeg(wx + 0.85, wy + 0.15, legH);
-
-      // Cross brace between legs
-      if (col < COLS-1) {{
+      if (col < COLS-1) {
         drawRail(wx, wy + 0.12, legH + 0.02, PW + PG);
-      }}
-
-      // Mounting rail (horizontal)
+      }
       drawRail(wx - 0.05, wy + 0.10, legH, PW + PG * 0.8);
-
-      // Bolt nodes at clamp positions
       drawBolt(wx + 0.5, wy + 0.12, legH + 0.06);
-
-      // Panel face
       const geom = drawTiltedPanel(wx, wy, wz, irrFrac, irrFrac > 0.5);
       panelGeoms.push(geom);
       pIdx++;
-    }}
-  }}
-
-  // Light beams from sun to panels
-  if (simH >= 6 && simH <= 18) {{
+    }
+  }
+  if (simH >= 6 && simH <= 18) {
     const [sunSX, sunSY] = sunScreenPos(simH);
     drawLightBeams(sunSX, sunSY, irrFrac, panelGeoms);
-  }}
-
-  // ── HUD update ────────────────────────────────────────────────────
+  }
   const hh = Math.floor(simH).toString().padStart(2,'0');
   const mm = Math.floor((simH - Math.floor(simH))*60).toString().padStart(2,'0');
   document.getElementById('hTime').textContent = hh+':'+mm;
@@ -1408,9 +1353,8 @@ function frame() {{
   document.getElementById('hPow').textContent  = power.toFixed(2)+' kW';
   document.getElementById('hTemp').textContent = cTemp.toFixed(1)+'°C';
   document.getElementById('irr-bar-fill').style.width = (irrFrac*100)+'%';
-
   requestAnimationFrame(frame);
-}}
+}
 requestAnimationFrame(frame);
 </script>
 </body>
@@ -1442,51 +1386,58 @@ with tabs[2]:
     </div>
     """, unsafe_allow_html=True)
 
-    fea_html = f"""<!DOCTYPE html>
+    _fea_vm    = float(fea_result['von_mises'])
+    _fea_bend  = float(fea_result['bending'])
+    _fea_axial = float(fea_result['axial'])
+    _fea_yield = int(fea_result['yield'])
+    _fea_sf    = float(fea_result['sf'])
+    _fea_fail  = "true" if fea_result['fail'] else "false"
+    _cols_fea  = min(anim_cols_count, 5)
+    _rows_fea  = min(anim_rows_count, 4)
+
+    fea_html = """<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
 <style>
-* {{ margin:0; padding:0; box-sizing:border-box; }}
-body {{ background:#020B1A; font-family:'Segoe UI',sans-serif; overflow:hidden; }}
-canvas {{ display:block; }}
-#controls {{
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#020B1A; font-family:'Segoe UI',sans-serif; overflow:hidden; }
+canvas { display:block; }
+#controls {
   position:absolute; top:8px; left:8px;
   background:rgba(5,14,37,0.92); border:1px solid rgba(245,158,11,0.25);
   border-radius:10px; padding:12px 16px; color:#94A3B8; font-size:11px; min-width:200px;
-}}
-.ctrl-row {{ display:flex; justify-content:space-between; margin:4px 0; }}
-.ctrl-val  {{ color:#F59E0B; font-weight:700; }}
-.ctrl-ok   {{ color:#10B981; }}
-.ctrl-fail {{ color:#EF4444; }}
-#colorbar {{
+}
+.ctrl-row { display:flex; justify-content:space-between; margin:4px 0; }
+.ctrl-val  { color:#F59E0B; font-weight:700; }
+.ctrl-ok   { color:#10B981; }
+.ctrl-fail { color:#EF4444; }
+#colorbar {
   position:absolute; right:10px; top:10px;
   background:rgba(5,14,37,0.88); border:1px solid rgba(245,158,11,0.2);
   border-radius:10px; padding:10px; font-size:10px; color:#94A3B8;
-}}
-#colorbar-gradient {{
-  width:18px; height:140px; border-radius:4px; margin:6px auto;
-}}
-#legend-labels {{ display:flex; flex-direction:column; justify-content:space-between; height:140px; font-size:9px; text-align:right; }}
-#bottom {{
+}
+#colorbar-gradient { width:18px; height:140px; border-radius:4px; margin:6px auto; }
+#legend-labels { display:flex; flex-direction:column; justify-content:space-between; height:140px; font-size:9px; text-align:right; }
+#bottom {
   position:absolute; bottom:0; left:0; right:0;
   background:rgba(5,14,37,0.88); border-top:1px solid rgba(245,158,11,0.2);
   padding:8px 16px; display:flex; gap:24px; font-size:10px; color:#64748B; flex-wrap:wrap;
-}}
-.b-val {{ color:#94A3B8; font-weight:700; }}
+}
+.b-val { color:#94A3B8; font-weight:700; }
 </style>
 </head>
 <body>
 <canvas id="fea"></canvas>
-
+""" + f"""
 <div id="controls">
   <div style="color:#F59E0B;font-weight:700;font-size:12px;margin-bottom:8px;letter-spacing:0.08em">FEA RESULTS</div>
-  <div class="ctrl-row"><span>Von Mises (MPa):</span> <span class="ctrl-val">{fea_result['von_mises']:.1f}</span></div>
-  <div class="ctrl-row"><span>Bending Stress:</span>  <span class="ctrl-val">{fea_result['bending']:.1f} MPa</span></div>
-  <div class="ctrl-row"><span>Axial Stress:</span>    <span class="ctrl-val">{fea_result['axial']:.1f} MPa</span></div>
-  <div class="ctrl-row"><span>Yield Strength:</span>  <span class="ctrl-val">{fea_result['yield']} MPa</span></div>
+  <div class="ctrl-row"><span>Von Mises (MPa):</span> <span class="ctrl-val">{_fea_vm:.1f}</span></div>
+  <div class="ctrl-row"><span>Bending Stress:</span>  <span class="ctrl-val">{_fea_bend:.1f} MPa</span></div>
+  <div class="ctrl-row"><span>Axial Stress:</span>    <span class="ctrl-val">{_fea_axial:.1f} MPa</span></div>
+  <div class="ctrl-row"><span>Yield Strength:</span>  <span class="ctrl-val">{_fea_yield} MPa</span></div>
   <div class="ctrl-row"><span>Safety Factor:</span>
-    <span class="{'ctrl-fail' if fea_result['sf'] < 1.5 else 'ctrl-ok'}">{fea_result['sf']:.2f}</span></div>
+    <span class="{'ctrl-fail' if fea_result['sf'] < 1.5 else 'ctrl-ok'}">{_fea_sf:.2f}</span></div>
   <div class="ctrl-row"><span>Status:</span>
     <span class="{'ctrl-fail' if fea_result['fail'] else 'ctrl-ok'}">{'⚠ YIELD' if fea_result['fail'] else '✓ SAFE'}</span></div>
   <div style="margin-top:10px;color:#475569;font-size:9px">
@@ -1501,10 +1452,10 @@ canvas {{ display:block; }}
   <div style="display:flex;gap:6px;align-items:center">
     <canvas id="colorbar-gradient" width="18" height="140"></canvas>
     <div id="legend-labels">
-      <span>{fea_result['yield']} ← Yield</span>
-      <span>{int(fea_result['yield']*0.75)}</span>
-      <span>{int(fea_result['yield']*0.50)}</span>
-      <span>{int(fea_result['yield']*0.25)}</span>
+      <span>{_fea_yield} ← Yield</span>
+      <span>{int(_fea_yield*0.75)}</span>
+      <span>{int(_fea_yield*0.50)}</span>
+      <span>{int(_fea_yield*0.25)}</span>
       <span>0</span>
     </div>
   </div>
@@ -1519,44 +1470,41 @@ canvas {{ display:block; }}
   <div>Standard: <span class="b-val">EN 1991-1-4</span></div>
   <div>Wind Zone: <span class="b-val">{wind_zone}</span></div>
 </div>
-
+""" + f"""
 <script>
 const cv  = document.getElementById('fea');
 const ctx = cv.getContext('2d');
-
 cv.width  = window.innerWidth;
 cv.height = window.innerHeight - 40;
 
-const YIELD_MPa = {fea_result['yield']};
-const VM_MPa    = {fea_result['von_mises']};
-const BEND_MPa  = {fea_result['bending']};
-const AXIAL_MPa = {fea_result['axial']};
-const SF        = {fea_result['sf']};
+const YIELD_MPa = {_fea_yield};
+const VM_MPa    = {_fea_vm:.2f};
+const BEND_MPa  = {_fea_bend:.2f};
+const AXIAL_MPa = {_fea_axial:.2f};
+const SF        = {_fea_sf:.2f};
 const WIND_KMH  = {wind:.1f};
 const TILT_DEG  = {tilt};
 const N_PANELS  = {min(p_qty, 10)};
-const ROWS_FEA  = {min(anim_rows_count, 4)};
-const COLS_FEA  = {min(anim_cols_count, 5)};
-
-// Colour map: 0=green → 0.5=yellow → 1=red
-function feaColor(fraction, alpha) {{
+const ROWS_FEA  = {_rows_fea};
+const COLS_FEA  = {_cols_fea};
+""" + """
+function feaColor(fraction, alpha) {
   fraction = Math.max(0, Math.min(1, fraction));
   let r,g,b;
-  if (fraction < 0.5) {{
+  if (fraction < 0.5) {
     const t = fraction*2;
     r = Math.round(16  + t*(245-16));
     g = Math.round(185 + t*(158-185));
     b = Math.round(129 + t*(11-129));
-  }} else {{
+  } else {
     const t = (fraction-0.5)*2;
     r = Math.round(245 + t*(239-245));
     g = Math.round(158 + t*(68-158));
     b = Math.round(11  + t*(68-11));
-  }}
-  return `rgba(${{r}},${{g}},${{b}},${{alpha||1.0}})`;
-}}
+  }
+  return 'rgba('+r+','+g+','+b+','+(alpha||1.0)+')';
+}
 
-// Colorbar
 const cb = document.getElementById('colorbar-gradient');
 const cbc = cb.getContext('2d');
 const grad = cbc.createLinearGradient(0, 0, 0, 140);
@@ -1568,20 +1516,18 @@ grad.addColorStop(1.0, '#10B981');
 cbc.fillStyle = grad;
 cbc.fillRect(0, 0, 18, 140);
 
-// Isometric helpers
 const ISO = Math.PI/6;
 const SC  = Math.min(cv.width, cv.height) * 0.028;
 const CX  = cv.width * 0.42;
 const CY  = cv.height * 0.55;
 
-function iso(wx, wy, wz) {{
+function iso(wx, wy, wz) {
   const sx = CX + (wx - wy) * Math.cos(ISO) * SC;
   const sy = CY - wz * SC + (wx + wy) * Math.sin(ISO) * SC * 0.55;
   return [sx, sy];
-}}
+}
 
-// Draw FEA quad with stress colour
-function feaFace(pts, stress, face) {{
+function feaFace(pts, stress, face) {
   const frac = Math.min(1, stress / YIELD_MPa);
   const shade = face==='top' ? 1.0 : face==='front' ? 0.82 : 0.65;
   ctx.beginPath();
@@ -1593,178 +1539,130 @@ function feaFace(pts, stress, face) {{
   ctx.strokeStyle = 'rgba(0,0,0,0.3)';
   ctx.lineWidth = 0.5;
   ctx.stroke();
-}}
+}
 
-// Draw stress gradient along element (shows stress distribution)
-function feaMember(x1,y1,z1, x2,y2,z2, thickness, stressLo, stressHi) {{
+function feaMember(x1,y1,z1, x2,y2,z2, thickness, stressLo, stressHi) {
   const steps = 8;
   const tw = thickness * 0.5;
-  for (let s = 0; s < steps; s++) {{
+  for (let s = 0; s < steps; s++) {
     const t0 = s/steps, t1 = (s+1)/steps;
     const mx0 = x1+(x2-x1)*t0, my0 = y1+(y2-y1)*t0, mz0 = z1+(z2-z1)*t0;
     const mx1 = x1+(x2-x1)*t1, my1 = y1+(y2-y1)*t1, mz1 = z1+(z2-z1)*t1;
     const stress = stressLo + (stressHi-stressLo)*((t0+t1)/2);
     const frac   = Math.min(1, stress / YIELD_MPa);
     const col    = feaColor(frac, 0.92);
-    // Draw small box segment
     const p = [
-      iso(mx0-tw, my0,    mz0),
-      iso(mx1-tw, my1,    mz1),
-      iso(mx1+tw, my1,    mz1),
-      iso(mx0+tw, my0,    mz0),
+      iso(mx0-tw, my0, mz0),
+      iso(mx1-tw, my1, mz1),
+      iso(mx1+tw, my1, mz1),
+      iso(mx0+tw, my0, mz0),
     ];
     ctx.beginPath();
     ctx.moveTo(...p[0]);
     for (let i=1;i<p.length;i++) ctx.lineTo(...p[i]);
     ctx.closePath(); ctx.fillStyle=col; ctx.fill();
     ctx.strokeStyle='rgba(0,0,0,0.2)'; ctx.lineWidth=0.3; ctx.stroke();
-  }}
-}}
+  }
+}
 
-// Arrow (force indicator)
-function drawArrow(x, y, len, col) {{
+function drawArrow(x, y, len, col) {
   ctx.save();
   ctx.translate(x,y);
   ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(len,0); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(len,0); ctx.lineTo(len-8,-5); ctx.lineTo(len-8,5); ctx.closePath(); ctx.fill();
   ctx.restore();
-}}
-
-// Deformation indicator particles
-let defParticles = [];
-for (let i = 0; i < 30; i++) {{
-  defParticles.push({{
-    x: 0.3 + Math.random()*(COLS_FEA*2), y: Math.random()*ROWS_FEA*1.5, z: Math.random()*3,
-    phase: Math.random()*Math.PI*2
-  }});
-}}
+}
 
 let tick = 0;
 
-function drawFrame() {{
+function drawFrame() {
   tick++;
   ctx.clearRect(0,0,cv.width,cv.height);
-
-  // Background
   const bg = ctx.createLinearGradient(0,0,0,cv.height);
   bg.addColorStop(0,'#020B1A'); bg.addColorStop(1,'#030F22');
   ctx.fillStyle=bg; ctx.fillRect(0,0,cv.width,cv.height);
-
-  // Grid
   ctx.strokeStyle='rgba(30,58,138,0.3)'; ctx.lineWidth=0.5;
-  for (let gx=-2; gx<=COLS_FEA*2+2; gx+=1) {{
+  for (let gx=-2; gx<=COLS_FEA*2+2; gx+=1) {
     const [sx1,sy1]=iso(gx,-1,0), [sx2,sy2]=iso(gx,ROWS_FEA*1.5+1,0);
     ctx.beginPath(); ctx.moveTo(sx1,sy1); ctx.lineTo(sx2,sy2); ctx.stroke();
-  }}
-  for (let gy=-1; gy<=ROWS_FEA*1.5+1; gy+=1) {{
+  }
+  for (let gy=-1; gy<=ROWS_FEA*1.5+1; gy+=1) {
     const [sx1,sy1]=iso(-2,gy,0), [sx2,sy2]=iso(COLS_FEA*2+2,gy,0);
     ctx.beginPath(); ctx.moveTo(sx1,sy1); ctx.lineTo(sx2,sy2); ctx.stroke();
-  }}
-
+  }
   const windFrac = Math.min(1, WIND_KMH / 160);
   const vmFrac   = Math.min(1, VM_MPa / YIELD_MPa);
-
-  // ── Render each panel module ──────────────────────────────────────
-  for (let row = ROWS_FEA-1; row >= 0; row--) {{
-    for (let col = 0; col < COLS_FEA; col++) {{
+  for (let row = ROWS_FEA-1; row >= 0; row--) {
+    for (let col = 0; col < COLS_FEA; col++) {
       const bx = col * 2.2;
       const by = row * 2.0;
       const legH = 1.2 + row * 0.1;
-
-      // Stress varies: max at base of leg, min at top
       const stressBase = VM_MPa * (0.9 + Math.sin(tick*0.04 + col + row)*0.05);
       const stressMid  = stressBase * 0.65;
       const stressTop  = stressBase * 0.25;
-
-      // Foundation block
       feaFace([iso(bx-0.1, by-0.1, -0.2), iso(bx+0.5, by-0.1,-0.2), iso(bx+0.5, by+0.5,-0.2), iso(bx-0.1, by+0.5,-0.2)], stressBase*0.4, 'top');
       feaFace([iso(bx-0.1, by-0.1, -0.2), iso(bx+0.5, by-0.1,-0.2), iso(bx+0.5, by-0.1,0), iso(bx-0.1, by-0.1,0)], stressBase*0.5, 'front');
-
-      // Left leg (post) - stress gradient from base (high) to top (low)
       feaMember(bx+0.1, by+0.1, 0, bx+0.1, by+0.1, legH, 0.1, stressBase, stressMid);
-      // Right leg
       feaMember(bx+0.9, by+0.1, 0, bx+0.9, by+0.1, legH, 0.1, stressBase, stressMid);
-
-      // Cross brace (tension member) - lower stress
       feaMember(bx+0.1, by+0.1, legH*0.4, bx+0.9, by+0.1, legH*0.4, 0.06, stressMid*0.6, stressMid*0.8);
-
-      // Mounting rail - bending dominant
       feaMember(bx+0.0, by+0.1, legH, bx+1.0, by+0.1, legH, 0.07, stressMid, stressBase*0.9);
-
-      // Panel frame (top rail)
       const sinT = Math.sin(TILT_DEG*Math.PI/180);
       const cosT = Math.cos(TILT_DEG*Math.PI/180);
-      // Panel face with FEA colour (bending stress on face)
       const panelFrac = Math.min(1, (BEND_MPa * 0.3) / YIELD_MPa);
-      const pcol = feaColor(panelFrac + vmFrac*0.1, 0.7);
-
       const pBL = iso(bx+0.0, by+0.1, legH);
       const pBR = iso(bx+1.0, by+0.1, legH);
       const pTR = iso(bx+1.0, by+0.1-1.4*sinT, legH+1.4*cosT);
       const pTL = iso(bx+0.0, by+0.1-1.4*sinT, legH+1.4*cosT);
-
       ctx.beginPath();
       ctx.moveTo(...pBL); ctx.lineTo(...pBR); ctx.lineTo(...pTR); ctx.lineTo(...pTL); ctx.closePath();
-
-      // Panel fill gradient (stress-based)
       const pg = ctx.createLinearGradient(pBL[0],pBL[1], pTR[0],pTR[1]);
-      pg.addColorStop(0, feaColor(vmFrac*0.6, 0.85));
+      pg.addColorStop(0,   feaColor(vmFrac*0.6, 0.85));
       pg.addColorStop(0.5, feaColor(vmFrac*0.85, 0.75));
       pg.addColorStop(1.0, feaColor(vmFrac*0.25, 0.65));
       ctx.fillStyle = pg; ctx.fill();
       ctx.strokeStyle='rgba(245,158,11,0.4)'; ctx.lineWidth=1.0; ctx.stroke();
-
-      // Bolt nodes
-      for (let bpos of [[bx+0.1,legH],[bx+0.9,legH]]) {{
+      for (let bpos of [[bx+0.1,legH],[bx+0.9,legH]]) {
         const [bsx, bsy] = iso(bpos[0], by+0.1, bpos[1]);
         const bFrac = Math.min(1, stressTop / YIELD_MPa);
         ctx.beginPath(); ctx.arc(bsx, bsy, 4, 0, Math.PI*2);
         ctx.fillStyle = feaColor(bFrac, 1.0); ctx.fill();
         ctx.strokeStyle='rgba(0,0,0,0.5)'; ctx.lineWidth=0.8; ctx.stroke();
-      }}
-
-      // Deformation arrows on panel face (wind load direction)
-      if (WIND_KMH > 30) {{
+      }
+      if (WIND_KMH > 30) {
         const midSX = (pBL[0]+pTL[0]+pBR[0]+pTR[0])/4;
         const midSY = (pBL[1]+pTL[1]+pBR[1]+pTR[1])/4;
         const arrowLen = 12 + windFrac * 20;
         const pulse = 0.7 + 0.3 * Math.sin(tick*0.08 + col*0.7 + row*0.5);
         ctx.globalAlpha = pulse;
-        drawArrow(midSX, midSY, arrowLen, `rgba(6,182,212,${0.7+windFrac*0.3})`);
+        const arrowAlpha = 0.7 + windFrac*0.3;
+        drawArrow(midSX, midSY, arrowLen, 'rgba(6,182,212,' + arrowAlpha + ')');
         ctx.globalAlpha = 1.0;
-      }}
-    }}
-  }}
-
-  // Stress contour overlay (radial glow at max-stress point)
+      }
+    }
+  }
   const legBase = iso(0.1, 0.1, 0);
   const maxStressPulse = 0.6 + 0.4 * Math.sin(tick*0.06);
-  if (vmFrac > 0.7) {{
+  if (vmFrac > 0.7) {
     const grd = ctx.createRadialGradient(legBase[0], legBase[1], 0, legBase[0], legBase[1], 40);
-    grd.addColorStop(0,   `rgba(239,68,68,${maxStressPulse*0.6})`);
-    grd.addColorStop(0.5, `rgba(239,68,68,${maxStressPulse*0.2})`);
+    grd.addColorStop(0,   'rgba(239,68,68,' + (maxStressPulse*0.6) + ')');
+    grd.addColorStop(0.5, 'rgba(239,68,68,' + (maxStressPulse*0.2) + ')');
     grd.addColorStop(1.0, 'rgba(239,68,68,0)');
     ctx.beginPath(); ctx.arc(legBase[0], legBase[1], 40, 0, Math.PI*2);
     ctx.fillStyle=grd; ctx.fill();
-  }}
-
-  // Wind arrows (scene-level)
+  }
   const windSpeed = WIND_KMH / 3.6;
-  for (let wa = 0; wa < 5; wa++) {{
+  for (let wa = 0; wa < 5; wa++) {
     const wy_w = wa * 0.8 + 0.5;
     const [sx,sy] = iso(-1.5, wy_w, 1.5 + wa*0.3);
     const alen = 30 + windFrac*50;
-    const alpha = 0.3 + 0.4*Math.sin(tick*0.07 + wa);
-    drawArrow(sx, sy, alen, `rgba(6,182,212,${{alpha}})`);
-    // Wind label on first
-    if (wa === 2) {{
+    const alpha_wa = 0.3 + 0.4*Math.sin(tick*0.07 + wa);
+    drawArrow(sx, sy, alen, 'rgba(6,182,212,' + alpha_wa + ')');
+    if (wa === 2) {
       ctx.fillStyle='rgba(6,182,212,0.7)'; ctx.font='bold 10px Segoe UI';
-      ctx.fillText(`W: ${{WIND_KMH.toFixed(0)}} km/h`, sx+alen+6, sy+4);
-    }}
-  }}
-
-  // Safety factor badge
+      ctx.fillText('W: ' + WIND_KMH.toFixed(0) + ' km/h', sx+alen+6, sy+4);
+    }
+  }
   const sfColor = SF >= 2.0 ? '#10B981' : SF >= 1.5 ? '#F59E0B' : '#EF4444';
   const [bx_sf, by_sf] = iso(COLS_FEA*2+0.5, -0.5, 2.5);
   ctx.save();
@@ -1773,14 +1671,12 @@ function drawFrame() {{
   ctx.strokeStyle = sfColor; ctx.lineWidth=1.5; ctx.stroke();
   ctx.fillStyle = sfColor; ctx.font = 'bold 13px Segoe UI';
   ctx.textAlign = 'center';
-  ctx.fillText(`SF = ${{SF.toFixed(2)}}`, bx_sf, by_sf);
+  ctx.fillText('SF = ' + SF.toFixed(2), bx_sf, by_sf);
   ctx.fillStyle='#64748B'; ctx.font='9px Segoe UI';
   ctx.fillText(SF>=2?'SAFE — GREEN':'SF < 2 CAUTION', bx_sf, by_sf+14);
   ctx.restore();
-
   requestAnimationFrame(drawFrame);
-}}
-
+}
 requestAnimationFrame(drawFrame);
 </script>
 </body>
@@ -1822,7 +1718,7 @@ requestAnimationFrame(drawFrame);
         )
         fig_wl.update_yaxes(title_text="Wind Force (kN)", gridcolor='rgba(255,255,255,0.05)', secondary_y=False)
         fig_wl.update_yaxes(title_text="Von Mises Stress (MPa)", secondary_y=True)
-        st.plotly_chart(fig_wl, use_container_width=True)
+        st.plotly_chart(fig_wl, width='stretch')
 
     with wc2:
         fig_wind = go.Figure(go.Indicator(
@@ -1843,7 +1739,7 @@ requestAnimationFrame(drawFrame);
             }
         ))
         fig_wind.update_layout(height=300, paper_bgcolor='rgba(0,0,0,0)', font={'color': '#F59E0B', 'family': 'Space Grotesk'})
-        st.plotly_chart(fig_wind, use_container_width=True)
+        st.plotly_chart(fig_wind, width='stretch')
 
     heatmap_speeds = [20, 40, 60, 80, 100, 120, 140, 160, 180, 200]
     heatmap_tilts  = [0, 10, 15, 20, 25, 30, 35, 40, 45, 60]
@@ -1860,7 +1756,7 @@ requestAnimationFrame(drawFrame);
         font=dict(color='#94A3B8'),
         xaxis=dict(title="Wind Speed (km/h)"), yaxis=dict(title="Tilt Angle (°)"),
     )
-    st.plotly_chart(fig_heat, use_container_width=True)
+    st.plotly_chart(fig_heat, width='stretch')
 
     st.divider()
     sc1, sc2, sc3, sc4 = st.columns(4)
@@ -1939,7 +1835,7 @@ with tabs[3]:
     fig_pr.update_layout(height=320, title="Performance Ratio Waterfall — Loss Breakdown",
         plot_bgcolor='rgba(11,20,55,0.6)', paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color='#94A3B8'), yaxis=dict(title="% of Ideal", gridcolor='rgba(255,255,255,0.05)'))
-    st.plotly_chart(fig_pr, use_container_width=True)
+    st.plotly_chart(fig_pr, width='stretch')
 
 # ── TAB 4: Inverter Design ──────────────────────────────────────────────
 with tabs[4]:
@@ -1979,7 +1875,7 @@ with tabs[5]:
             plot_bgcolor='rgba(11,20,55,0.6)', paper_bgcolor='rgba(0,0,0,0)',
             font=dict(color='#94A3B8'), xaxis=dict(title="Hour", gridcolor='rgba(255,255,255,0.05)'),
             yaxis=dict(title="kWh", gridcolor='rgba(255,255,255,0.05)'))
-        st.plotly_chart(fig_soc, use_container_width=True)
+        st.plotly_chart(fig_soc, width='stretch')
     else:
         st.markdown("<div class='sxpro-info'>ℹ️ Grid-Tied System — No Battery Storage. Select battery type to enable storage analysis.</div>", unsafe_allow_html=True)
     st.divider()
@@ -1989,7 +1885,7 @@ with tabs[5]:
          "Life (yrs)": v["life_years"], "Best For": "Budget" if k == "Lead-Acid" else "Longevity" if k == "Lithium-Ion" else "Mid-Range"}
         for k, v in BATTERY_TYPES.items()
     ])
-    st.dataframe(bat_data, use_container_width=True, hide_index=True)
+    st.dataframe(bat_data, width='stretch', hide_index=True)
 
 # ── TAB 6: Electrical Design ────────────────────────────────────────────
 with tabs[6]:
@@ -2024,13 +1920,13 @@ with tabs[6]:
         font=dict(color='#94A3B8'),
         yaxis=dict(title="Voltage Drop %", gridcolor='rgba(255,255,255,0.05)'),
         xaxis=dict(title="Cable Cross-Section"))
-    st.plotly_chart(fig_cable, use_container_width=True)
+    st.plotly_chart(fig_cable, width='stretch')
 
 # ── TAB 7: Financial Model ──────────────────────────────────────────────
 with tabs[7]:
     st.markdown("<span class='sxpro-section-label'>25-Year Financial Investment Model</span>", unsafe_allow_html=True)
     if weather["live"]:
-        st.markdown(f"<div class='sxpro-ok'>🔴 <strong>Live Weather</strong> — Financial model uses real GHI/wind/temperature for {country}. Results reflect actual site conditions.</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='sxpro-ok'>🔴 <strong>Live Weather</strong> — Financial model uses real GHI/wind/temperature for {country}.</div>", unsafe_allow_html=True)
     fm1, fm2, fm3, fm4 = st.columns(4)
     fm1.metric("Gross CapEx",    f"{gross_cost:,.0f} {c_curr}", "Before subsidy")
     fm2.metric("Net CapEx",      f"{net_cost:,.0f} {c_curr}",  f"-{subsidy_pct}% subsidy")
@@ -2044,12 +1940,12 @@ with tabs[7]:
     fig_fin.add_trace(go.Scatter(x=list(range(25)), y=list(cumulative), name="Cumulative NPV",
                                   line=dict(color='#10B981', width=3)), secondary_y=True)
     fig_fin.add_hline(y=0, line_dash="dash", line_color="rgba(255,255,255,0.2)")
-    fig_fin.update_layout(height=400, title="25-Year Financial Projection (Tariff Inflation + Live Weather)",
+    fig_fin.update_layout(height=400, title="25-Year Financial Projection",
         plot_bgcolor='rgba(11,20,55,0.6)', paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color='#94A3B8'), legend=dict(bgcolor='rgba(0,0,0,0)'))
     fig_fin.update_yaxes(title_text=f"Annual Revenue ({c_curr})", gridcolor='rgba(255,255,255,0.05)', secondary_y=False)
     fig_fin.update_yaxes(title_text=f"Cumulative NPV ({c_curr})", secondary_y=True)
-    st.plotly_chart(fig_fin, use_container_width=True)
+    st.plotly_chart(fig_fin, width='stretch')
     st.divider()
     cost_labels = ["Panels","Inverter","Battery","Structure","Cable","Lightning","Installation"]
     cost_values = [max(0,v) for v in [panel_cost,inverter_cost,battery_cost,structure_cost,cable_cost,lightning_cost,sys_size*install_cost]]
@@ -2063,7 +1959,7 @@ with tabs[7]:
         legend=dict(bgcolor='rgba(15,32,87,0.5)', bordercolor='rgba(255,255,255,0.1)', borderwidth=1),
         annotations=[dict(text=f"{c_curr}<br>{net_cost/1000:,.0f}K", x=0.5, y=0.5, font_size=13,
                           font_color='#F59E0B', showarrow=False)])
-    st.plotly_chart(fig_pie, use_container_width=True)
+    st.plotly_chart(fig_pie, width='stretch')
     fa1, fa2, fa3 = st.columns(3)
     fa1.metric("Daily Savings",    f"{fin_report['Daily_Savings_Currency']:,.2f} {c_curr}")
     fa2.metric("Export Credit/day",f"{fin_report['Export_Credit']:,.2f} {c_curr}")
@@ -2084,7 +1980,7 @@ with tabs[8]:
         plot_bgcolor='rgba(11,20,55,0.6)', paper_bgcolor='rgba(0,0,0,0)', font=dict(color='#94A3B8'),
         xaxis=dict(title="Year", gridcolor='rgba(255,255,255,0.05)'),
         yaxis=dict(title="Tons CO₂", gridcolor='rgba(255,255,255,0.05)'))
-    st.plotly_chart(fig_eco, use_container_width=True)
+    st.plotly_chart(fig_eco, width='stretch')
 
 # ── TAB 9: ESG Ethics ───────────────────────────────────────────────────
 with tabs[9]:
@@ -2166,13 +2062,13 @@ Country    : {country} | Location: {location_name}
 Data Mode  : {'LIVE WEATHER API (Open-Meteo)' if weather['live'] else 'Country Database Fallback'}
 Wind Speed : {wind:.0f} km/h {'[LIVE]' if weather['live'] else '[DB]'}
 Temperature: {temp_ambient:.1f} °C {'[LIVE]' if weather['live'] else '[DB]'}
-GHI        : {sun_h:.2f} kWh/m²/day {'[LIVE]' if weather['live'] else '[DB]'}
+GHI        : {sun_h:.2f} kWh/m2/day {'[LIVE]' if weather['live'] else '[DB]'}
 ══════════════════════════════════════════════════════════════════════
 SYSTEM SUMMARY
   Peak PV Capacity    : {sys_size:.2f} kWp
   Panel Config        : {p_qty} x {panel_type}
   Inverter            : {inverter_type} @ {inv_eff}%
-  Battery             : {battery_type} — {b_cap} kWh
+  Battery             : {battery_type} - {b_cap} kWh
   Backup Autonomy     : {hours_of_autonomy:.1f} hours
 
 PERFORMANCE
@@ -2184,7 +2080,7 @@ PERFORMANCE
 ELECTRICAL
   String Voltage VOC  : {voc_string:.0f} V
   DC Current ISC      : {isc_string:.1f} A
-  Cable               : {cable_size}mm² x {wire_length}m
+  Cable               : {cable_size}mm2 x {wire_length}m
   Voltage Drop        : {vd_percent:.2f}%
 
 STRUCTURAL FEA
@@ -2204,8 +2100,7 @@ FINANCIAL
   CO2 Avoided/Year    : {co2_annual:.2f} tons
 
 ══════════════════════════════════════════════════════════════════════
-CRITICAL   : {len([i for i in issues if chr(128308) in i])} | WARNINGS: {len([i for i in issues if chr(128993) in i])}
-GRADE      : {"A — Excellent" if pr > 80 else "B — Good" if pr > 70 else "C — Needs Optimisation"}
+GRADE      : {"A - Excellent" if pr > 80 else "B - Good" if pr > 70 else "C - Needs Optimisation"}
 ══════════════════════════════════════════════════════════════════════
 """, height=340)
 
@@ -2263,9 +2158,9 @@ with tabs[12]:
                                    line=dict(color='#06B6D4', width=2), name="Irradiance W/m²"), row=2, col=1)
     fig_phys.update_layout(height=500, plot_bgcolor='rgba(11,20,55,0.6)', paper_bgcolor='rgba(0,0,0,0)',
                             font=dict(color='#94A3B8'), legend=dict(bgcolor='rgba(0,0,0,0)'))
-    st.plotly_chart(fig_phys, use_container_width=True)
+    st.plotly_chart(fig_phys, width='stretch')
     display_cols = [c for c in ["Hour","Temperature","Wind_Speed","Cloud_Cover","Incident_Irradiance","Cell_Temperature","Hourly_Yield_kW"] if c in sim_df.columns]
-    st.dataframe(sim_df[display_cols].round(2), use_container_width=True, hide_index=True)
+    st.dataframe(sim_df[display_cols].round(2), width='stretch', hide_index=True)
 
 # ── TAB 13: Storage Matrix ──────────────────────────────────────────────
 with tabs[13]:
@@ -2285,7 +2180,7 @@ with tabs[13]:
         "Bus Voltage (V)":  [v[4] for v in battery_db.values()],
         "Notes":            [v[5] for v in battery_db.values()],
     })
-    st.dataframe(full_bat_df, use_container_width=True, hide_index=True)
+    st.dataframe(full_bat_df, width='stretch', hide_index=True)
     if b_cost_kwh > 0:
         eff_vals  = [v[0] for v in battery_db.values() if v[0] > 0]
         cyc_vals  = [v[1] for v in battery_db.values() if v[0] > 0]
@@ -2301,7 +2196,7 @@ with tabs[13]:
             plot_bgcolor='rgba(11,20,55,0.6)', paper_bgcolor='rgba(0,0,0,0)', font=dict(color='#94A3B8'),
             xaxis=dict(title="Round-Trip Eff (%)", gridcolor='rgba(255,255,255,0.05)'),
             yaxis=dict(title="Cycle Life", gridcolor='rgba(255,255,255,0.05)'))
-        st.plotly_chart(fig_bat, use_container_width=True)
+        st.plotly_chart(fig_bat, width='stretch')
 
 # ── TAB 14: Export Report ───────────────────────────────────────────────
 with tabs[14]:
@@ -2379,7 +2274,7 @@ with tabs[14]:
 
     st.divider()
     st.markdown("<span class='sxpro-section-label'>Hourly Data Preview</span>", unsafe_allow_html=True)
-    st.dataframe(df_export, height=340, use_container_width=True, hide_index=True)
+    st.dataframe(df_export, height=340, width='stretch', hide_index=True)
 
 # ── FOOTER ─────────────────────────────────────────────────────────────
 st.divider()
