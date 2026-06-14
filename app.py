@@ -1745,7 +1745,10 @@ function drawFrame() {{
         const arrowLen = 12 + windFrac * 20;
         const pulse = 0.7 + 0.3 * Math.sin(tick*0.08 + col*0.7 + row*0.5);
         ctx.globalAlpha = pulse;
-        drawArrow(midSX, midSY, arrowLen, `rgba(6,182,212,${0.7+windFrac*0.3})`);
+        
+        // Rewritten to use standard quotes and plus signs to bypass Python's f-string parsing
+        drawArrow(midSX, midSY, arrowLen, "rgba(6,182,212," + (0.7 + windFrac * 0.3) + ")");
+        
         ctx.globalAlpha = 1.0;
       }}
     }}
