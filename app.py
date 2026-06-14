@@ -1755,7 +1755,7 @@ function drawFrame() {{
   }}
 
   // Stress contour overlay (radial glow at max-stress point)
-html_javascript_content = """
+html_code = """
 <script>
   const legBase = iso(0.1, 0.1, 0);
   const maxStressPulse = 0.6 + 0.4 * Math.sin(tick*0.06);
@@ -1763,7 +1763,7 @@ html_javascript_content = """
     const grd = ctx.createRadialGradient(legBase[0], legBase[1], 0, legBase[0], legBase[1], 40);
     grd.addColorStop(0,   `rgba(239,68,68,${maxStressPulse*0.6})`);
     grd.addColorStop(0.5, `rgba(239,68,68,${maxStressPulse*0.2})`);
-    grd.addColorStop(1.0, "rgba(239,68,68,0)"); // Use double quotes inside if Python string uses single, or vice versa
+    grd.addColorStop(1.0, 'rgba(239,68,68,0)');
     ctx.beginPath(); ctx.arc(legBase[0], legBase[1], 40, 0, Math.PI*2);
     ctx.fillStyle=grd; ctx.fill();
   }
