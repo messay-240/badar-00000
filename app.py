@@ -1755,17 +1755,20 @@ function drawFrame() {{
   }}
 
   // Stress contour overlay (radial glow at max-stress point)
- const legBase = iso(0.1, 0.1, 0);
- const maxStressPulse = 0.6 + 0.4 * Math.sin(tick*0.06);
- if (vmFrac > 0.7) {
+html_javascript_content = """
+<script>
+  const legBase = iso(0.1, 0.1, 0);
+  const maxStressPulse = 0.6 + 0.4 * Math.sin(tick*0.06);
+  if (vmFrac > 0.7) {
     const grd = ctx.createRadialGradient(legBase[0], legBase[1], 0, legBase[0], legBase[1], 40);
-    // Python won't mistake this for a Python variable now:
     grd.addColorStop(0,   `rgba(239,68,68,${maxStressPulse*0.6})`);
     grd.addColorStop(0.5, `rgba(239,68,68,${maxStressPulse*0.2})`);
-    grd.addColorStop(1.0, 'rgba(239,68,68,0)');
+    grd.addColorStop(1.0, "rgba(239,68,68,0)"); // Use double quotes inside if Python string uses single, or vice versa
     ctx.beginPath(); ctx.arc(legBase[0], legBase[1], 40, 0, Math.PI*2);
     ctx.fillStyle=grd; ctx.fill();
- }
+  }
+</script>
+"""
 
   // Wind arrows (scene-level)
   const windSpeed = WIND_KMH / 3.6;
