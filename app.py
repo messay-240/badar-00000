@@ -1257,13 +1257,17 @@ function drawSun(hour, irrFrac) {{
   if (hour < 6 || hour > 18) return;
   const [sx, sy] = sunScreenPos(hour);
   const opacity = 0.3 + irrFrac*0.7;
+  
   // Outer glow
   const grd = ctx.createRadialGradient(sx,sy,0, sx,sy,90);
-  grd.addColorStop(0,   `rgba(252,211,77,${opacity*0.9})`);
-  grd.addColorStop(0.4, `rgba(245,158,11,${opacity*0.3})`);
+  // Rewritten with string concatenation so Python ignores the syntax:
+  grd.addColorStop(0,   "rgba(252,211,77," + (opacity * 0.9) + ")");
+  grd.addColorStop(0.4, "rgba(245,158,11," + (opacity * 0.3) + ")");
   grd.addColorStop(1.0, 'rgba(245,158,11,0)');
+  
   ctx.beginPath(); ctx.arc(sx,sy,90,0,Math.PI*2);
   ctx.fillStyle = grd; ctx.fill();
+  
   // Core
   const core = ctx.createRadialGradient(sx,sy,0,sx,sy,22);
   core.addColorStop(0,   '#FEFCE8');
@@ -1271,10 +1275,13 @@ function drawSun(hour, irrFrac) {{
   core.addColorStop(1.0, '#F59E0B');
   ctx.beginPath(); ctx.arc(sx,sy,22,0,Math.PI*2);
   ctx.fillStyle = core; ctx.fill();
+  
   // Rays
   ctx.save(); ctx.translate(sx,sy); ctx.rotate(simH * 0.8);
-  ctx.strokeStyle = `rgba(252,211,77,${opacity*0.6})`;
+  // Rewritten to avoid backticks:
+  ctx.strokeStyle = "rgba(252,211,77," + (opacity * 0.6) + ")";
   ctx.lineWidth = 2;
+  
   for (let a = 0; a < 8; a++) {{
     const angle = a * Math.PI/4;
     ctx.beginPath();
