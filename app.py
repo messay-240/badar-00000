@@ -1756,7 +1756,7 @@ function drawFrame() {{
 
   // Stress contour overlay (radial glow at max-stress point)
 html_code = """
-<script>
+</script>
   const legBase = iso(0.1, 0.1, 0);
   const maxStressPulse = 0.6 + 0.4 * Math.sin(tick*0.06);
   if (vmFrac > 0.7) {
