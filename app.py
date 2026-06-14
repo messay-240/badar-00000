@@ -1205,16 +1205,23 @@ function updateWindParticles(windFactor) {{
   }}
 }}
 
-function drawWindParticles(windFactor) {{
+function drawWindParticles(windFactor) {
   const alpha = Math.min(0.8, 0.25 + windFactor * 0.4);
-  for (let p of wParticles) {{
+  
+  for (let p of wParticles) {
     const [x1, y1] = iso(p.wx,        p.wy, p.wz);
     const [x2, y2] = iso(p.wx-p.len,  p.wy, p.wz);
-    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2);
-    ctx.strokeStyle = `rgba(6,182,212,${alpha * (1-p.life*0.5)})`;
-    ctx.lineWidth = 1.2; ctx.stroke();
-  }}
-}}
+    
+    ctx.beginPath(); 
+    ctx.moveTo(x1, y1); 
+    ctx.lineTo(x2, y2);
+    
+    // Uses standard JS concatenation so Python ignores the syntax
+    ctx.strokeStyle = "rgba(6,182,212," + (alpha * (1 - p.life * 0.5)) + ")";
+    ctx.lineWidth = 1.2; 
+    ctx.stroke();
+  }
+}
 
 // ─── Light beams ─────────────────────────────────────────────────────
 function drawLightBeams(sunSX, sunSY, irrFrac, panels) {{
